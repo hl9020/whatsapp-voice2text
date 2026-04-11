@@ -1,0 +1,15 @@
+services:
+  wa-transcriber:
+    build: .
+    container_name: wa-transcriber
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3000:3000"
+    volumes:
+      - auth-private:/app/auth_private
+      - auth-business:/app/auth_business
+
+volumes:
+  auth-private:
+  auth-business:
