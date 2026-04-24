@@ -37,7 +37,7 @@ async function handleAudioMessage(sock: WASocket, msg: WAMessage, sessionName: s
     const text = await transcribe(audioUrl)
 
     if (text.trim()) {
-      await sock.sendMessage(jid, { text: `*Transcript:*\n${text}` }, { quoted: msg })
+      await sock.sendMessage(jid, { text: `*${config.transcriptLabel}:*\n${text}` }, { quoted: msg })
       const preview = text.length > 60 ? text.slice(0, 60) + '...' : text
       addLog(sessionName, `${short}: ${preview}`)
       console.log(`[${sessionName}] sent transcript to ${short}`)

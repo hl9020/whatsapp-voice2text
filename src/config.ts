@@ -6,6 +6,7 @@ interface Config {
   dashboardPort: number
   enableGroups: boolean
   logLevel: string
+  transcriptLabel: string
 }
 
 export const config: Config = {
@@ -14,6 +15,7 @@ export const config: Config = {
   dashboardPort: parseInt(process.env.DASHBOARD_PORT || '3000'),
   enableGroups: false,
   logLevel: process.env.LOG_LEVEL || 'info',
+  transcriptLabel: process.env.TRANSCRIPT_LABEL || 'Transcript',
 }
 
 if (!config.gladiaApiKey) {
