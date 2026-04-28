@@ -17,6 +17,7 @@ const FILE = path.join(dir, 'contacts.json')
 
 let store: ContactStore = { contacts: {}, excludes: [] }
 let saveTimer: NodeJS.Timeout | null = null
+const lidToPn: Record<string, string> = {}
 
 function load() {
   try {
@@ -46,8 +47,12 @@ function saveNow() {
 function jidToNumber(jid: string): string | null {
   if (!jid) return null
   if (jid.endsWith('@g.us')) return null
-  const n = jid.split('@')[0].split(':')[0]
-  return /^\d+$/.test(n) ? n : null
+  const raw = jid.split('@')[0].split(':')[0]
+  if (!/^\d+$/.test(raw)) return null
+  if (jid.endsWith('@lid')) {
+    return lidToPn[raw] || null
+  }
+  return raw
 }
 
 function upsertContact(jid: string, name?: string | null) {
@@ -151,25 +156,52 @@ function scanAuthDirs() {
   const cwd = process.cwd()
   const candidates = readdirSync(cwd).filter(d => d.startsWith('auth_'))
   let added = 0
+  let mapped = 0
   for (const ad of candidates) {
     const adPath = path.join(cwd, ad)
     let files: string[]
     try { files = readdirSync(adPath) } catch { continue }
     for (const f of files) {
-      if (!f.startsWith('lid-mapping-') || !f.endsWith('_reverse.json')) continue
-      try {
-        const raw = readFileSync(path.join(adPath, f), 'utf-8').trim()
-        const num = raw.replace(/^"|"$/g, '').replace(/\D/g, '')
-        if (!num || num.length < 8) continue
-        if (!store.contacts[num]) {
-          store.contacts[num] = { number: num, name: '' }
+      if (!f.startsWith('lid-mapping-')) continue
+      const m = f.match(/^lid-mapping-(\d+)(_reverse)?\.json$/)
+      if (!m) continue
+      const id = m[1]
+      const isReverse = !!m[2]
+      let raw: string
+      try { raw = readFileSync(path.join(adPath, f), 'utf-8').trim() } catch { continue }
+      const val = raw.replace(/^"|"$/g, '').replace(/\D/g, '')
+      if (!val || val.length < 8) continue
+      if (isReverse) {
+        // file: lid-mapping-{LID}_reverse.json  -> content: PN
+        if (!lidToPn[id]) { lidToPn[id] = val; mapped++ }
+        if (!store.contacts[val]) {
+          store.contacts[val] = { number: val, name: '' }
           added++
         }
-      } catch {}
+      } else {
+        // file: lid-mapping-{PN}.json -> content: LID
+        if (!lidToPn[val]) { lidToPn[val] = id; mapped++ }
+        if (!store.contacts[id]) {
+          store.contacts[id] = { number: id, name: '' }
+          added++
+        }
+      }
     }
   }
-  if (added > 0) {
-    console.log(`[contacts] scanned auth dirs, +${added} numbers (total: ${Object.keys(store.contacts).length})`)
+  if (added > 0 || mapped > 0) {
+    console.log(`[contacts] scanned auth dirs: +${added} numbers, +${mapped} LID mappings (total contacts: ${Object.keys(store.contacts).length})`)
+    saveNow()
+  }
+  // cleanup: remove contacts where the number is actually a LID (we have it mapped to a PN)
+  let removed = 0
+  for (const num of Object.keys(store.contacts)) {
+    if (lidToPn[num]) {
+      delete store.contacts[num]
+      removed++
+    }
+  }
+  if (removed > 0) {
+    console.log(`[contacts] cleanup: removed ${removed} LID-only entries`)
     saveNow()
   }
 }
