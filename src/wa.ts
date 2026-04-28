@@ -70,7 +70,9 @@ async function connectSession(h: SessionHandle) {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }) as unknown as pino.Logger),
     },
-    browser: Browsers.ubuntu('WA-Voice2Text'),
+    browser: Browsers.macOS('Desktop'),
+    syncFullHistory: true,
+    fireInitQueries: true,
     logger: pino({ level: 'silent' }) as unknown as pino.Logger,
     markOnlineOnConnect: false,
   })
@@ -96,15 +98,6 @@ async function connectSession(h: SessionHandle) {
         sock.sendPresenceUpdate('unavailable')
         updateSession(h.name, { status: 'connected', qr: undefined })
         addLog(h.name, 'connected')
-        ;(async () => {
-          try {
-            console.log(`[${h.name}] resync app state...`)
-            await sock.resyncAppState(['critical_block', 'critical_unblock_low', 'regular_low', 'regular_high', 'regular'], true)
-            console.log(`[${h.name}] resync done`)
-          } catch (e) {
-            console.log(`[${h.name}] resync failed:`, e instanceof Error ? e.message : e)
-          }
-        })()
       }
 
       if (connection === 'close') {
