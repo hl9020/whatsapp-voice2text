@@ -13,6 +13,7 @@ import pino from 'pino'
 import { config } from './config.js'
 import { uploadAudio, transcribe } from './gladia.js'
 import { updateSession, addLog, setSessionToggleHandler } from './dashboard.js'
+import { bindContacts, isExcluded } from './contacts.js'
 
 async function handleAudioMessage(sock: WASocket, msg: WAMessage, sessionName: string) {
   const audio = msg.message?.audioMessage
@@ -21,6 +22,7 @@ async function handleAudioMessage(sock: WASocket, msg: WAMessage, sessionName: s
   const jid = msg.key.remoteJid
   if (!jid) return
   if (jid.endsWith('@g.us') && !config.enableGroups) return
+  if (!jid.endsWith('@g.us') && isExcluded(jid)) return
 
   const tag = msg.key.fromMe ? 'outgoing' : 'incoming'
   const short = jid.replace('@s.whatsapp.net', '')
@@ -73,6 +75,8 @@ async function connectSession(h: SessionHandle) {
     markOnlineOnConnect: false,
   })
   h.sock = sock
+
+  bindContacts(sock.ev)
 
   sock.ev.process(async (events) => {
     if (events['creds.update']) await saveCreds()

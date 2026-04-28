@@ -2,6 +2,7 @@ import express from 'express'
 import QRCode from 'qrcode'
 import { config } from './config.js'
 import { loadState, saveState } from './state.js'
+import { searchContacts, listExcludes, addExclude, removeExclude } from './contacts.js'
 
 interface SessionState {
   status: 'waiting_qr' | 'connected' | 'disconnected' | 'disabled'
@@ -80,6 +81,22 @@ h2{font-size:1.1rem;margin-bottom:12px;color:#a3a3a3}
 .toggle input:checked+.slider:before{transform:translateX(22px)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .pulse{animation:pulse 1.5s infinite}
+.search-wrap{position:relative}
+.search-input{width:100%;background:#0a0a0a;border:1px solid #333;color:#e5e5e5;padding:10px 12px;border-radius:8px;font-size:.9rem;font-family:inherit}
+.search-input:focus{outline:none;border-color:#60a5fa}
+.suggestions{position:absolute;top:100%;left:0;right:0;background:#1a1a1a;border:1px solid #333;border-radius:8px;margin-top:4px;max-height:240px;overflow-y:auto;z-index:10}
+.suggestion{padding:10px 12px;cursor:pointer;border-bottom:1px solid #262626;font-size:.85rem}
+.suggestion:hover{background:#262626}
+.suggestion:last-child{border-bottom:none}
+.sug-name{color:#e5e5e5;font-weight:500}
+.sug-num{color:#737373;font-size:.8rem;margin-left:8px}
+.sug-empty{padding:10px 12px;color:#737373;font-size:.85rem}
+.exclude-list{margin-top:12px}
+.exclude-item{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#0a0a0a;border:1px solid #262626;border-radius:6px;margin-bottom:6px;font-size:.85rem}
+.exclude-info{color:#e5e5e5}
+.exclude-num{color:#737373;font-size:.8rem;margin-left:8px}
+.del-btn{background:none;border:none;color:#ef4444;cursor:pointer;font-size:1.1rem;padding:2px 8px;border-radius:4px}
+.del-btn:hover{background:#7f1d1d}
 </style>
 </head><body>
 <h1>WA Voice2Text</h1>
@@ -110,13 +127,65 @@ async function toggleGroups(enable){
   poll();
 }
 
+let searchTimer=null;
+async function onSearchInput(val){
+  if(searchTimer)clearTimeout(searchTimer);
+  const box=document.getElementById('suggestions');
+  if(!val.trim()){box.innerHTML='';box.style.display='none';return}
+  searchTimer=setTimeout(async()=>{
+    const r=await api('/api/contacts?q='+encodeURIComponent(val));
+    const list=r.contacts||[];
+    if(!list.length){box.innerHTML='<div class="sug-empty">Keine Treffer</div>';box.style.display='block';return}
+    let h='';
+    for(const c of list){
+      const nm=c.name||'(unbekannt)';
+      h+='<div class="suggestion" onclick="addExc(\\\''+c.number+'\\\')">';
+      h+='<span class="sug-name">'+nm+'</span><span class="sug-num">'+c.number+'</span></div>';
+    }
+    box.innerHTML=h;box.style.display='block';
+  },200);
+}
+
+async function addExc(num){
+  await api('/api/excludes?number='+num,'POST');
+  document.getElementById('search').value='';
+  document.getElementById('suggestions').innerHTML='';
+  document.getElementById('suggestions').style.display='none';
+  poll();
+}
+
+async function delExc(num){
+  await api('/api/excludes?number='+num,'DELETE');
+  poll();
+}
+
 function render(data){
   lastData=data;
-  const s=data.sessions||{};
-  const g=data.enableGroups||false;
-  const l=data.logs||[];
-  let h='';
+  ensureLayout();
+  renderSessions(data.sessions||{},data.enableGroups||false);
+  renderExcludes(data.excludes||[]);
+  renderLogs(data.logs||[]);
+}
 
+function ensureLayout(){
+  const app=document.getElementById('app');
+  if(app.dataset.built)return;
+  let h='';
+  h+='<div id="sessions-wrap"></div>';
+  h+='<div class="card"><h2>Excluded Contacts (1:1 only)</h2>';
+  h+='<div class="search-wrap">';
+  h+='<input id="search" class="search-input" placeholder="Name oder Nummer suchen..." oninput="onSearchInput(this.value)" autocomplete="off">';
+  h+='<div id="suggestions" class="suggestions" style="display:none"></div>';
+  h+='</div>';
+  h+='<div id="exclude-list" class="exclude-list"></div>';
+  h+='</div>';
+  h+='<div class="logs"><h2>Recent Transcriptions</h2><div id="log-list"></div></div>';
+  app.innerHTML=h;
+  app.dataset.built='1';
+}
+
+function renderSessions(s,g){
+  let h='';
   for(const[name,state]of Object.entries(s)){
     const st=state;
     const pending=pendingToggle[name];
@@ -132,26 +201,41 @@ function render(data){
     h+=' onchange="toggleSession(\\\''+name+'\\\',this.checked)">';
     h+='<span class="slider"></span></label>';
     h+='</div>';
-
     if(st.enabled && st.qrDataUrl){
       h+='<div class="qr"><img src="'+st.qrDataUrl+'" alt="QR"></div>';
     }
     h+='</div>';
   }
-
   h+='<div class="card"><div class="row"><span>Group chats</span>';
   h+='<label class="toggle"><input type="checkbox" '+(g?'checked':'')+' onchange="toggleGroups(this.checked)">';
   h+='<span class="slider"></span></label></div></div>';
+  document.getElementById('sessions-wrap').innerHTML=h;
+}
 
-  h+='<div class="logs"><h2>Recent Transcriptions</h2>';
-  if(!l.length) h+='<p style="color:#737373">No transcriptions yet...</p>';
+function renderExcludes(ex){
+  let h='';
+  if(!ex.length) h='<p style="color:#737373;font-size:.85rem;margin-top:8px">Keine ausgeschlossenen Kontakte</p>';
+  for(const e of ex){
+    const nm=e.name||'(unbekannt)';
+    h+='<div class="exclude-item">';
+    h+='<div><span class="exclude-info">'+nm+'</span><span class="exclude-num">'+e.number+'</span></div>';
+    h+='<button class="del-btn" onclick="delExc(\\\''+e.number+'\\\')">✕</button>';
+    h+='</div>';
+  }
+  const el=document.getElementById('exclude-list');
+  if(el) el.innerHTML=h;
+}
+
+function renderLogs(l){
+  let h='';
+  if(!l.length) h='<p style="color:#737373">No transcriptions yet...</p>';
   for(const e of l){
     h+='<div class="log"><span class="log-time">'+e.time+'</span> ';
     h+='<span class="log-session">['+e.session+']</span> ';
     h+='<span class="log-text">'+e.text+'</span></div>';
   }
-  h+='</div>';
-  document.getElementById('app').innerHTML=h;
+  const el=document.getElementById('log-list');
+  if(el) el.innerHTML=h;
 }
 
 async function poll(){
@@ -198,7 +282,31 @@ setInterval(poll,3000);
       }
       out[name] = { ...state, qr: undefined, qrDataUrl }
     }
-    res.json({ sessions: out, enableGroups: config.enableGroups, logs: logs.slice(0, 20) })
+    res.json({
+      sessions: out,
+      enableGroups: config.enableGroups,
+      logs: logs.slice(0, 20),
+      excludes: listExcludes(),
+    })
+  })
+
+  app.get('/api/contacts', (req, res) => {
+    const q = (req.query.q as string) || ''
+    res.json({ contacts: searchContacts(q, 20) })
+  })
+
+  app.post('/api/excludes', (req, res) => {
+    const number = (req.query.number as string) || ''
+    const ok = addExclude(number)
+    if (ok) addLog('system', `excluded ${number}`)
+    res.json({ ok })
+  })
+
+  app.delete('/api/excludes', (req, res) => {
+    const number = (req.query.number as string) || ''
+    const ok = removeExclude(number)
+    if (ok) addLog('system', `removed exclude ${number}`)
+    res.json({ ok })
   })
 
   app.listen(port, () => console.log(`Dashboard: http://localhost:${port}`))
