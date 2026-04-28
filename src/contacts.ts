@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'fs'
 import path from 'path'
 import type { BaileysEventEmitter } from '@whiskeysockets/baileys'
 
@@ -147,4 +147,32 @@ export function removeExclude(number: string): boolean {
   return true
 }
 
+function scanAuthDirs() {
+  const cwd = process.cwd()
+  const candidates = readdirSync(cwd).filter(d => d.startsWith('auth_'))
+  let added = 0
+  for (const ad of candidates) {
+    const adPath = path.join(cwd, ad)
+    let files: string[]
+    try { files = readdirSync(adPath) } catch { continue }
+    for (const f of files) {
+      if (!f.startsWith('lid-mapping-') || !f.endsWith('_reverse.json')) continue
+      try {
+        const raw = readFileSync(path.join(adPath, f), 'utf-8').trim()
+        const num = raw.replace(/^"|"$/g, '').replace(/\D/g, '')
+        if (!num || num.length < 8) continue
+        if (!store.contacts[num]) {
+          store.contacts[num] = { number: num, name: '' }
+          added++
+        }
+      } catch {}
+    }
+  }
+  if (added > 0) {
+    console.log(`[contacts] scanned auth dirs, +${added} numbers (total: ${Object.keys(store.contacts).length})`)
+    saveNow()
+  }
+}
+
 load()
+scanAuthDirs()
