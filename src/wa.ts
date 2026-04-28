@@ -72,7 +72,6 @@ async function connectSession(h: SessionHandle) {
     },
     browser: Browsers.macOS('Desktop'),
     syncFullHistory: true,
-    fireInitQueries: true,
     logger: pino({ level: 'silent' }) as unknown as pino.Logger,
     markOnlineOnConnect: false,
   })
@@ -81,8 +80,6 @@ async function connectSession(h: SessionHandle) {
   bindContacts(sock.ev)
 
   sock.ev.process(async (events) => {
-    const eventNames = Object.keys(events)
-    if (eventNames.length) console.log(`[${h.name}] events:`, eventNames.join(','))
     if (events['creds.update']) await saveCreds()
 
     if (events['connection.update']) {
