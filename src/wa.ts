@@ -55,9 +55,45 @@ interface SessionHandle {
   authDir: string
   sock: WASocket | null
   stop: boolean
+  connecting: boolean
+  retries: number
+  reconnectTimer: NodeJS.Timeout | null
+  watchdog: NodeJS.Timeout | null
 }
 
 const handles = new Map<string, SessionHandle>()
+
+function scheduleReconnect(h: SessionHandle) {
+  if (h.stop || h.reconnectTimer) return
+  const delay = Math.min(5000 * 2 ** h.retries, 60000)
+  h.retries++
+  console.log(`[${h.name}] reconnecting in ${delay / 1000}s (try ${h.retries})...`)
+  addLog(h.name, 'disconnected - reconnecting...')
+  h.reconnectTimer = setTimeout(() => {
+    h.reconnectTimer = null
+    connectSession(h)
+  }, delay)
+}
+
+function isSocketAlive(h: SessionHandle): boolean {
+  const ws = h.sock?.ws as { readyState?: number } | undefined
+  return ws?.readyState === 1
+}
+
+function startWatchdog(h: SessionHandle) {
+  if (h.watchdog) return
+  h.watchdog = setInterval(() => {
+    if (h.stop) return
+    if (h.connecting || h.reconnectTimer) return
+    if (!isSocketAlive(h)) {
+      console.log(`[${h.name}] watchdog: socket dead, forcing reconnect`)
+      addLog(h.name, 'watchdog - forcing reconnect')
+      try { h.sock?.end(undefined) } catch {}
+      h.sock = null
+      scheduleReconnect(h)
+    }
+  }, 30000)
+}
 
 async function connectSession(h: SessionHandle) {
   if (h.stop) return
@@ -71,11 +107,13 @@ async function connectSession(h: SessionHandle) {
       keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }) as unknown as pino.Logger),
     },
     browser: Browsers.macOS('Desktop'),
-    syncFullHistory: true,
+    syncFullHistory: false,
     logger: pino({ level: 'silent' }) as unknown as pino.Logger,
     markOnlineOnConnect: false,
+    keepAliveIntervalMs: 25000,
   })
   h.sock = sock
+  h.connecting = true
 
   bindContacts(sock.ev)
 
@@ -92,18 +130,20 @@ async function connectSession(h: SessionHandle) {
 
       if (connection === 'open') {
         console.log(`[${h.name}] connected!`)
+        h.connecting = false
+        h.retries = 0
         sock.sendPresenceUpdate('unavailable')
         updateSession(h.name, { status: 'connected', qr: undefined })
         addLog(h.name, 'connected')
+        startWatchdog(h)
       }
 
       if (connection === 'close') {
         const code = (lastDisconnect?.error as Boom)?.output?.statusCode
+        h.connecting = false
         updateSession(h.name, { status: 'disconnected', qr: undefined })
         if (!h.stop && code !== DisconnectReason.loggedOut) {
-          console.log(`[${h.name}] reconnecting in 5s...`)
-          addLog(h.name, 'disconnected - reconnecting...')
-          setTimeout(() => connectSession(h), 5000)
+          scheduleReconnect(h)
         } else if (code === DisconnectReason.loggedOut) {
           addLog(h.name, 'logged out')
         }
@@ -121,7 +161,10 @@ async function connectSession(h: SessionHandle) {
 }
 
 export function registerSession(name: string, authDir: string) {
-  const h: SessionHandle = { name, authDir, sock: null, stop: true }
+  const h: SessionHandle = {
+    name, authDir, sock: null, stop: true,
+    connecting: false, retries: 0, reconnectTimer: null, watchdog: null,
+  }
   handles.set(name, h)
   updateSession(name, { status: 'disabled', enabled: false })
 }
@@ -130,6 +173,7 @@ function enableSession(name: string) {
   const h = handles.get(name)
   if (!h || !h.stop) return
   h.stop = false
+  h.retries = 0
   updateSession(name, { enabled: true, status: 'disconnected' })
   console.log(`[${name}] starting...`)
   connectSession(h)
@@ -141,6 +185,9 @@ function disableSession(name: string) {
   const h = handles.get(name)
   if (!h || h.stop) return
   h.stop = true
+  h.connecting = false
+  if (h.reconnectTimer) { clearTimeout(h.reconnectTimer); h.reconnectTimer = null }
+  if (h.watchdog) { clearInterval(h.watchdog); h.watchdog = null }
   if (h.sock) { h.sock.end(undefined); h.sock = null }
   updateSession(name, { enabled: false, status: 'disabled', qr: undefined })
   console.log(`[${name}] stopped`)
