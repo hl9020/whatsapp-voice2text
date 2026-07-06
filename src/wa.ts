@@ -59,6 +59,7 @@ interface SessionHandle {
   retries: number
   reconnectTimer: NodeJS.Timeout | null
   watchdog: NodeJS.Timeout | null
+  missedChecks: number
 }
 
 const handles = new Map<string, SessionHandle>()
@@ -76,8 +77,10 @@ function scheduleReconnect(h: SessionHandle) {
 }
 
 function isSocketAlive(h: SessionHandle): boolean {
-  const ws = h.sock?.ws as { readyState?: number } | undefined
-  return ws?.readyState === 1
+  const ws = h.sock?.ws as { isOpen?: boolean; socket?: { readyState?: number } } | undefined
+  if (!ws) return false
+  if (typeof ws.isOpen === 'boolean') return ws.isOpen
+  return ws.socket?.readyState === 1
 }
 
 function startWatchdog(h: SessionHandle) {
@@ -85,13 +88,15 @@ function startWatchdog(h: SessionHandle) {
   h.watchdog = setInterval(() => {
     if (h.stop) return
     if (h.connecting || h.reconnectTimer) return
-    if (!isSocketAlive(h)) {
-      console.log(`[${h.name}] watchdog: socket dead, forcing reconnect`)
-      addLog(h.name, 'watchdog - forcing reconnect')
-      try { h.sock?.end(undefined) } catch {}
-      h.sock = null
-      scheduleReconnect(h)
-    }
+    if (isSocketAlive(h)) { h.missedChecks = 0; return }
+    h.missedChecks++
+    if (h.missedChecks < 2) return
+    console.log(`[${h.name}] watchdog: socket dead, forcing reconnect`)
+    addLog(h.name, 'watchdog - forcing reconnect')
+    try { h.sock?.end(undefined) } catch {}
+    h.sock = null
+    h.missedChecks = 0
+    scheduleReconnect(h)
   }, 30000)
 }
 
@@ -132,6 +137,7 @@ async function connectSession(h: SessionHandle) {
         console.log(`[${h.name}] connected!`)
         h.connecting = false
         h.retries = 0
+        h.missedChecks = 0
         sock.sendPresenceUpdate('unavailable')
         updateSession(h.name, { status: 'connected', qr: undefined })
         addLog(h.name, 'connected')
@@ -163,7 +169,7 @@ async function connectSession(h: SessionHandle) {
 export function registerSession(name: string, authDir: string) {
   const h: SessionHandle = {
     name, authDir, sock: null, stop: true,
-    connecting: false, retries: 0, reconnectTimer: null, watchdog: null,
+    connecting: false, retries: 0, reconnectTimer: null, watchdog: null, missedChecks: 0,
   }
   handles.set(name, h)
   updateSession(name, { status: 'disabled', enabled: false })
