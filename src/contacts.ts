@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'fs'
 import path from 'path'
-import type { BaileysEventEmitter } from '@whiskeysockets/baileys'
+import type { BaileysEventEmitter, WAMessageKey } from '@whiskeysockets/baileys'
 
 interface Contact {
   number: string
@@ -18,6 +18,8 @@ const FILE = path.join(dir, 'contacts.json')
 let store: ContactStore = { contacts: {}, excludes: [] }
 let saveTimer: NodeJS.Timeout | null = null
 const lidToPn: Record<string, string> = {}
+let lastLidScan = 0
+const LID_RESCAN_MS = 30000
 
 function load() {
   try {
@@ -50,9 +52,18 @@ function jidToNumber(jid: string): string | null {
   const raw = jid.split('@')[0].split(':')[0]
   if (!/^\d+$/.test(raw)) return null
   if (jid.endsWith('@lid')) {
+    if (!lidToPn[raw] && Date.now() - lastLidScan > LID_RESCAN_MS) scanAuthDirs()
     return lidToPn[raw] || null
   }
   return raw
+}
+
+export function toNumber(jid: string): string | null {
+  return jidToNumber(jid)
+}
+
+export function peerJid(key: WAMessageKey): string {
+  return key.remoteJidAlt || key.remoteJid || ''
 }
 
 function upsertContact(jid: string, name?: string | null) {
@@ -94,7 +105,7 @@ export function bindContacts(ev: BaileysEventEmitter) {
   })
   ev.on('messages.upsert', ({ messages }) => {
     for (const m of messages) {
-      const remote = m.key.remoteJid
+      const remote = peerJid(m.key)
       if (!remote || remote.endsWith('@g.us')) continue
       upsertContact(remote, m.pushName)
     }
@@ -148,6 +159,7 @@ export function removeExclude(number: string): boolean {
 }
 
 function scanAuthDirs() {
+  lastLidScan = Date.now()
   const cwd = process.cwd()
   const candidates = readdirSync(cwd).filter(d => d.startsWith('auth_'))
   let added = 0

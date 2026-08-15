@@ -13,7 +13,7 @@ import pino from 'pino'
 import { config } from './config.js'
 import { uploadAudio, transcribe } from './gladia.js'
 import { updateSession, addLog, setSessionToggleHandler } from './dashboard.js'
-import { bindContacts, isExcluded } from './contacts.js'
+import { bindContacts, isExcluded, peerJid, toNumber } from './contacts.js'
 
 async function handleAudioMessage(sock: WASocket, msg: WAMessage, sessionName: string) {
   const audio = msg.message?.audioMessage
@@ -21,11 +21,13 @@ async function handleAudioMessage(sock: WASocket, msg: WAMessage, sessionName: s
 
   const jid = msg.key.remoteJid
   if (!jid) return
-  if (jid.endsWith('@g.us') && !config.enableGroups) return
-  if (!jid.endsWith('@g.us') && isExcluded(jid)) return
+  const isGroup = jid.endsWith('@g.us')
+  if (isGroup && !config.enableGroups) return
+  const peer = peerJid(msg.key)
+  if (!isGroup && isExcluded(peer)) return
 
   const tag = msg.key.fromMe ? 'outgoing' : 'incoming'
-  const short = jid.replace('@s.whatsapp.net', '')
+  const short = toNumber(peer) || peer.replace('@s.whatsapp.net', '')
   console.log(`[${sessionName}] ${tag} voice msg from ${short}`)
   addLog(sessionName, `${tag} voice from ${short} - transcribing...`)
 
