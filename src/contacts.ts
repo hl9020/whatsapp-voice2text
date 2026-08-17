@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'fs'
 import path from 'path'
 import type { BaileysEventEmitter, WAMessageKey } from '@whiskeysockets/baileys'
+import { dataDir, migrateFromAuthDir } from './state.js'
 
 interface Contact {
   number: string
@@ -12,7 +13,7 @@ interface ContactStore {
   excludes: string[]
 }
 
-const dir = path.resolve('auth_private')
+const dir = dataDir
 const FILE = path.join(dir, 'contacts.json')
 
 let store: ContactStore = { contacts: {}, excludes: [] }
@@ -22,6 +23,7 @@ let lastLidScan = 0
 const LID_RESCAN_MS = 30000
 
 function load() {
+  migrateFromAuthDir('contacts.json')
   try {
     store = JSON.parse(readFileSync(FILE, 'utf-8'))
     if (!store.contacts) store.contacts = {}

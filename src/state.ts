@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'fs'
 import path from 'path'
 
 interface PersistedState {
@@ -6,10 +6,20 @@ interface PersistedState {
   enableGroups: boolean
 }
 
-const stateDir = path.resolve('auth_private')
-const STATE_FILE = path.join(stateDir, 'state.json')
+export const dataDir = path.resolve('data')
+const STATE_FILE = path.join(dataDir, 'state.json')
+
+export function migrateFromAuthDir(name: string) {
+  const target = path.join(dataDir, name)
+  const legacy = path.resolve('auth_private', name)
+  if (existsSync(target) || !existsSync(legacy)) return
+  mkdirSync(dataDir, { recursive: true })
+  copyFileSync(legacy, target)
+  console.log(`[data] migrated ${name} from auth_private`)
+}
 
 export function loadState(): PersistedState {
+  migrateFromAuthDir('state.json')
   try {
     return JSON.parse(readFileSync(STATE_FILE, 'utf-8'))
   } catch {
@@ -18,6 +28,6 @@ export function loadState(): PersistedState {
 }
 
 export function saveState(state: PersistedState) {
-  mkdirSync(stateDir, { recursive: true })
+  mkdirSync(dataDir, { recursive: true })
   writeFileSync(STATE_FILE, JSON.stringify(state, null, 2))
 }

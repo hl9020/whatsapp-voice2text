@@ -10,6 +10,8 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys'
 import { Boom } from '@hapi/boom'
 import pino from 'pino'
+import { readdirSync, statSync, unlinkSync } from 'fs'
+import path from 'path'
 import { config } from './config.js'
 import { uploadAudio, transcribe } from './gladia.js'
 import { updateSession, addLog, setSessionToggleHandler } from './dashboard.js'
@@ -66,6 +68,32 @@ interface SessionHandle {
 
 const handles = new Map<string, SessionHandle>()
 
+const KEEP_PREKEYS = 1000
+const PREKEY_MIN_AGE_MS = 14 * 24 * 3600 * 1000
+
+function prunePreKeys(authDir: string, name: string) {
+  let files: string[]
+  try { files = readdirSync(authDir) } catch { return }
+  const keys: { id: number; file: string }[] = []
+  for (const f of files) {
+    const m = f.match(/^pre-key-(\d+)\.json$/)
+    if (m) keys.push({ id: Number(m[1]), file: f })
+  }
+  if (keys.length <= KEEP_PREKEYS) return
+  keys.sort((a, b) => b.id - a.id)
+  const cutoff = Date.now() - PREKEY_MIN_AGE_MS
+  let removed = 0
+  for (const k of keys.slice(KEEP_PREKEYS)) {
+    const p = path.join(authDir, k.file)
+    try {
+      if (statSync(p).mtimeMs > cutoff) continue
+      unlinkSync(p)
+      removed++
+    } catch {}
+  }
+  if (removed) console.log(`[${name}] pruned ${removed} old pre-keys (${keys.length} -> ${keys.length - removed})`)
+}
+
 function scheduleReconnect(h: SessionHandle) {
   if (h.stop || h.reconnectTimer) return
   const delay = Math.min(5000 * 2 ** h.retries, 60000)
@@ -104,6 +132,7 @@ function startWatchdog(h: SessionHandle) {
 
 async function connectSession(h: SessionHandle) {
   if (h.stop) return
+  prunePreKeys(h.authDir, h.name)
   const { state, saveCreds } = await useMultiFileAuthState(h.authDir)
   const { version } = await fetchLatestBaileysVersion()
 
