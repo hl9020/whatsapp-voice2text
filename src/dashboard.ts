@@ -30,6 +30,10 @@ export function updateSession(name: string, state: Partial<SessionState>) {
   sessions.set(name, { ...cur, ...state })
 }
 
+export function listSessions(): { name: string; status: SessionState['status']; enabled: boolean }[] {
+  return [...sessions].map(([name, s]) => ({ name, status: s.status, enabled: s.enabled }))
+}
+
 export function addLog(session: string, text: string) {
   const time = new Date().toLocaleTimeString('de-AT', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   logs.unshift({ time, session, text })

@@ -2,6 +2,7 @@ import { config } from './config.js'
 import { registerSession, initSessions, enableSessionByName } from './wa.js'
 import { startDashboard } from './dashboard.js'
 import { loadState } from './state.js'
+import { startMonitor } from './notify.js'
 import path from 'path'
 
 const sessionDefs = [
@@ -29,6 +30,7 @@ async function main() {
   }
 
   console.log('Ready - manage sessions via dashboard')
+  startMonitor()
 }
 
 main().catch(console.error)
