@@ -145,7 +145,7 @@ export function listExcludes(): Contact[] {
 
 export function addExclude(number: string): boolean {
   const num = number.replace(/\D/g, '')
-  if (!num || store.excludes.includes(num)) return false
+  if (num.length < 8 || num.length > 15 || store.excludes.includes(num)) return false
   store.excludes.push(num)
   saveNow()
   return true

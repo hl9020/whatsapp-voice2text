@@ -131,16 +131,37 @@ async function toggleGroups(enable){
   poll();
 }
 
+function normNum(v){
+  const t=v.trim();
+  if(!t||/[a-z]/i.test(t))return '';
+  let d=t.replace(/[^0-9]/g,'');
+  if(!t.startsWith('+')){
+    if(d.startsWith('00'))d=d.slice(2);
+    else if(d.startsWith('0'))d='43'+d.slice(1);
+  }
+  return d.length>=8&&d.length<=15?d:'';
+}
+
+function onEnter(val){
+  const n=normNum(val);
+  if(n)addExc(n);
+}
+
 let searchTimer=null;
 async function onSearchInput(val){
   if(searchTimer)clearTimeout(searchTimer);
   const box=document.getElementById('suggestions');
   if(!val.trim()){box.innerHTML='';box.style.display='none';return}
   searchTimer=setTimeout(async()=>{
-    const r=await api('/api/contacts?q='+encodeURIComponent(val));
+    const n=normNum(val);
+    const r=await api('/api/contacts?q='+encodeURIComponent(n||val));
     const list=r.contacts||[];
-    if(!list.length){box.innerHTML='<div class="sug-empty">Keine Treffer</div>';box.style.display='block';return}
     let h='';
+    if(n&&!list.some(c=>c.number===n)){
+      h+='<div class="suggestion" onclick="addExc(\\\''+n+'\\\')">';
+      h+='<span class="sug-name">Nummer übernehmen</span><span class="sug-num">+'+n+'</span></div>';
+    }
+    if(!list.length&&!h){box.innerHTML='<div class="sug-empty">Keine Treffer</div>';box.style.display='block';return}
     for(const c of list){
       const nm=c.name||'(unbekannt)';
       h+='<div class="suggestion" onclick="addExc(\\\''+c.number+'\\\')">';
@@ -151,6 +172,7 @@ async function onSearchInput(val){
 }
 
 async function addExc(num){
+  if(searchTimer)clearTimeout(searchTimer);
   await api('/api/excludes?number='+num,'POST');
   document.getElementById('search').value='';
   document.getElementById('suggestions').innerHTML='';
@@ -178,7 +200,7 @@ function ensureLayout(){
   h+='<div id="sessions-wrap"></div>';
   h+='<div class="card"><h2>Excluded Contacts (1:1 only)</h2>';
   h+='<div class="search-wrap">';
-  h+='<input id="search" class="search-input" placeholder="Name oder Nummer suchen..." oninput="onSearchInput(this.value)" autocomplete="off">';
+  h+='<input id="search" class="search-input" placeholder="Name suchen oder Nummer eingeben (Enter übernimmt)" oninput="onSearchInput(this.value)" autocomplete="off">';
   h+='<div id="suggestions" class="suggestions" style="display:none"></div>';
   h+='</div>';
   h+='<div id="exclude-list" class="exclude-list"></div>';
@@ -186,6 +208,7 @@ function ensureLayout(){
   h+='<div class="logs"><h2>Recent Transcriptions</h2><div id="log-list"></div></div>';
   app.innerHTML=h;
   app.dataset.built='1';
+  document.getElementById('search').addEventListener('keydown',e=>{if(e.key==='Enter')onEnter(e.target.value)});
 }
 
 function renderSessions(s,g){
